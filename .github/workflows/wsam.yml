@@ -1,0 +1,45 @@
+name: Build Wessam VIP Tweak
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout Project Code
+      uses: actions/checkout@v4
+
+    - name: Setup Theos
+      uses: actions/checkout@v4
+      with:
+        repository: theos/theos
+        path: theos
+        submodules: true
+
+    - name: Set THEOS Environment Variable
+      run: echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+
+    - name: Setup iOS SDKs
+      uses: actions/checkout@v4
+      with:
+        repository: theos/sdks
+        path: theos/sdks
+
+    - name: Install ldid
+      run: brew install ldid
+
+    - name: Build Tweak (Make Package)
+      run: |
+        make package FINALPACKAGE=1
+
+    - name: Upload Compiled Tweak
+      uses: actions/upload-artifact@v4
+      with:
+        name: Wessam-VIP-Hack
+        path: packages/*.deb
+        
