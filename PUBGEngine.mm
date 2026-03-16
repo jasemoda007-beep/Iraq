@@ -1,6 +1,6 @@
 //
-//  PUBGEngine.mm - WESAM VIP (3D EDITION)
-//  كامل مكمل 100% - يحتوي على مكتبة الرسومات والتحويل الإحداثي
+//  PUBGEngine.mm - WESAM VIP (3D & CHEETO EDITION)
+//  تحديث PUBG 4.2 - كامل بدون أي نقص
 //
 
 #include "Bone.hpp"
@@ -12,7 +12,7 @@
 #import "菜单.h"
 #include <notify.h>
 
-// متغيرات النظام
+// متغيرات النظام الأساسية
 static long GWorld, UName, Engine, PersistentLevel, PlayerController, Character, PlayerCameraManager, MyHUD, SmallFont, HUD, Canvas;
 static FVector2D CanvasSize;
 static MinimalViewInfo POV;
@@ -30,10 +30,29 @@ static MinimalViewInfo POV;
 #define kTeamID 0x998
 #define kIsDead 0xdd4
 
+// أوفستات الرسم (العالمية - كمثال)
+const char *kDrawText = "0x106272E54";
+const char *kDrawLine = "0x10560FED0";
+const char *kDrawRectFilled = "0x10560FE40";
+
 // ==========================================
-// 🔵 الطبقة 1: مكتبة الرسومات والذاكرة (Graphics & Memory Lib)
-// (هذا القسم يحل الـ 16 خطأ اللي ظهروا عندك)
+// 🔵 الطبقة 1: أدوات الذاكرة (Memory Helpers)
 // ==========================================
+
+static uintptr_t Get_module_base() {
+    uint32_t count = _dyld_image_count();
+    for (int i = 0; i < count; i++) {
+        std::string path = (const char *)_dyld_get_image_name(i);
+        if (path.find("ShadowTrackerExtra.app/ShadowTrackerExtra") != path.npos) {
+            return (uintptr_t)_dyld_get_image_vmaddr_slide(i);
+        }
+    }
+    return 0;
+}
+
+static bool IsValidAddress(long address) {
+    return address && address > 0x100000000 && address < 0x3000000000;
+}
 
 template<typename T>
 static T Read(uintptr_t address) {
@@ -46,20 +65,14 @@ static bool Read_data(long Adder, int Size, void* buff) {
     return vm_copy(mach_task_self(), (vm_address_t)Adder, (vm_size_t)Size, (vm_address_t)buff) == 0;
 }
 
-static uintptr_t GetRealOffset(string address) {
-    static uintptr_t base = 0;
-    if (!base) {
-        uint32_t count = _dyld_image_count();
-        for (int i = 0; i < count; i++) {
-            if (string(_dyld_get_image_name(i)).find("ShadowTrackerExtra") != string::npos) {
-                base = _dyld_get_image_vmaddr_slide(i); break;
-            }
-        }
-    }
-    return base + (uintptr_t)strtoul(address.c_str(), nullptr, 16);
+static uintptr_t GetRealOffset(const char* offset) {
+    return Get_module_base() + (uintptr_t)strtoul(offset, nullptr, 16);
 }
 
-// دوال الرسم الأساسية
+// ==========================================
+// 🟡 الطبقة 2: مكتبة الرسم (Graphics Engine)
+// ==========================================
+
 static void DrawLine(FVector2D start, FVector2D end, int color, float thick = 1.0f) {
     reinterpret_cast<void(__fastcall*)(long, FVector2D, FVector2D, FLinearColor, float)>(GetRealOffset(kDrawLine))(HUD, start, end, FLinearColor(color), thick);
 }
@@ -69,11 +82,10 @@ static void DrawRectFilled(FVector2D pos, FVector2D size, int color) {
 }
 
 static void DrawText(string text, FVector2D pos, int color, int size = 10) {
-    if (text.empty()) return;
+    if (text.empty() || !Canvas || !SmallFont) return;
     reinterpret_cast<void(__fastcall*)(long, long, FString, FVector2D, FLinearColor, float, FLinearColor, FVector2D, bool, bool, bool, FLinearColor)>(GetRealOffset(kDrawText))(Canvas, SmallFont, FString(text.c_str()), pos, FLinearColor(color), 0.5f, FLinearColor(0,0,0,1), FVector2D(), true, false, true, FLinearColor(0,0,0,1));
 }
 
-// تحويل الإحداثيات (WorldToScreen)
 static FVector2D WorldToScreen(FVector worldLoc, MinimalViewInfo viewInfo) {
     float radPitch = viewInfo.Rotation.Pitch * (M_PI / 180.f);
     float radYaw = viewInfo.Rotation.Yaw * (M_PI / 180.f);
@@ -89,46 +101,40 @@ static FVector2D WorldToScreen(FVector worldLoc, MinimalViewInfo viewInfo) {
     FVector vDelta = worldLoc - viewInfo.Location;
     FVector vTrans(FVector::Dot(vDelta, FVector(m[1][0],m[1][1],m[1][2])), FVector::Dot(vDelta, FVector(m[2][0],m[2][1],m[2][2])), FVector::Dot(vDelta, FVector(m[0][0],m[0][1],m[0][2])));
     if (vTrans.z < 1.0f) vTrans.z = 1.0f;
-    float centerX = CanvasSize.x/2, centerY = CanvasSize.y/2;
-    return FVector2D(centerX + vTrans.x * (centerX / tanf(viewInfo.FOV * M_PI/360.f)) / vTrans.z, centerY - vTrans.y * (centerX / tanf(viewInfo.FOV * M_PI/360.f)) / vTrans.z);
+    return FVector2D((CanvasSize.x/2) + vTrans.x * ((CanvasSize.x/2) / tanf(viewInfo.FOV * M_PI/360.f)) / vTrans.z, (CanvasSize.y/2) - vTrans.y * ((CanvasSize.x/2) / tanf(viewInfo.FOV * M_PI/360.f)) / vTrans.z);
 }
 
-// دالة فحص الظهور على الشاشة
 static bool isScreenVisible(FVector2D pos) {
     return (pos.x > 0 && pos.x < CanvasSize.x && pos.y > 0 && pos.y < CanvasSize.y);
 }
 
 // ==========================================
-// 🟡 الطبقة 2: ميزة الـ 3D Box (التصميم الحديث)
+// 🟢 الطبقة 3: ميزات الـ 3D والـ ESP
 // ==========================================
 
+// رسم صندوق ثلاثي الأبعاد (3D Box)
 static void Draw3DBox(FVector loc, int color, float thick) {
-    float w = 45.f, h = 90.f; // أبعاد الصندوق الافتراضية
-    FVector corners[8] = {
+    float w = 40.f, h = 85.f; 
+    FVector c[8] = {
         {loc.x-w, loc.y-w, loc.z-h}, {loc.x+w, loc.y-w, loc.z-h}, {loc.x+w, loc.y+w, loc.z-h}, {loc.x-w, loc.y+w, loc.z-h},
         {loc.x-w, loc.y-w, loc.z+h}, {loc.x+w, loc.y-w, loc.z+h}, {loc.x+w, loc.y+w, loc.z+h}, {loc.x-w, loc.y+w, loc.z+h}
     };
     FVector2D s[8];
-    for(int i=0; i<8; i++) s[i] = WorldToScreen(corners[i], POV);
-    
-    // رسم الأضلاع الـ 12 للبوكس الـ 3D
+    for(int i=0; i<8; i++) s[i] = WorldToScreen(c[i], POV);
     for(int i=0; i<4; i++) {
-        DrawLine(s[i], s[(i+1)%4], color, thick);     // قاعدة
-        DrawLine(s[i+4], s[((i+1)%4)+4], color, thick); // سقف
-        DrawLine(s[i], s[i+4], color, thick);         // أعمدة جانبية
+        DrawLine(s[i], s[(i+1)%4], color, thick);     
+        DrawLine(s[i+4], s[((i+1)%4)+4], color, thick); 
+        DrawLine(s[i], s[i+4], color, thick);         
     }
 }
-
-// ==========================================
-// 🟢 الطبقة 3: المعالجة الرئيسية (ESP Processor)
-// ==========================================
 
 static FVector GetRelativeLocation(long actor) {
     long root = Read<long>(actor + kRootComponent);
     return IsValidAddress(root) ? Read<FVector>(root + kRelativeLocation) : FVector{0,0,0};
 }
 
-void RenderPlayerESP(long actor) {
+// الدالة الرئيسية لمعالجة كل لاعب
+void ProcessPlayerESP(long actor) {
     float hp = Read<float>(actor + kHealth);
     bool isBot = Read<bool>(actor + kIsRobot);
     if (Read<bool>(actor + kIsDead) || hp <= 0) return;
@@ -139,13 +145,17 @@ void RenderPlayerESP(long actor) {
 
     int themeCol = isBot ? Colour_白色 : Colour_浅蓝;
 
-    // تفعيل الـ 3D Box
+    // 1. رسم الصندوق 3D
     if (显示盒子) Draw3DBox(loc, themeCol, 1.2f);
 
-    // شريط الصحة العمودي (شيتو ستايل)
-    DrawRectFilled(FVector2D(screenPos.x-40, screenPos.y-50), FVector2D(2, 100 * (hp/100.f)), Colour_绿色);
+    // 2. شريط الصحة (شيتو ستايل)
+    float healthBarH = 80.0f * (hp / 100.f);
+    DrawRectFilled(FVector2D(screenPos.x - 35, screenPos.y + 40 - healthBarH), FVector2D(2, healthBarH), Colour_绿色);
 
-    // الاسم والمسافة
-    string info = "Enemy [" + to_string((int)(markDistance/100)) + "m]";
-    DrawText(info, FVector2D(screenPos.x-20, screenPos.y-70), Colour_白色);
+    // 3. المسافة والاسم
+    float dist = FVector::Distance(POV.Location, loc) / 100.0f;
+    string info = "Enemy [" + to_string((int)dist) + "m]";
+    DrawText(info, FVector2D(screenPos.x - 20, screenPos.y - 60), Colour_白色);
 }
+
+// نهاية الملف - Wesam VIP Edition
