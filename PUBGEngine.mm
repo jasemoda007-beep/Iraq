@@ -50,6 +50,10 @@ float 击打距离 = 500;        // مسافة التفعيل للايمبوت (
 float 物资距离 = 500;        // مسافة إظهار اللوت / العناصر (Items Distance)
 
 bool 屏蔽人机=NO;            // تجاهل البوتات وعدم إظهارهم (Ignore Bots)
+
+// السطرين اللي ضفناهم حتى المنيو ما يكرش (حسب طلب المترجم)
+bool 框架开关 = NO;
+int 自瞄模式 = 0;
 // ==========================================
 
 // الأوفستات مفعلة لتجنب الكراش
@@ -525,27 +529,4 @@ static string GetPlayerName(long player) {
         Utf16_To_Utf8(buf16, name, 28, strictConversion);
         n = string((const char *)name);
     }
-    return n;
-}
-
-static FVector GetRelativeLocation2(long actor) {
-    return Read<FVector>(Read<long>(actor + I64("0x1B0") + I64("0x184")));
-}
-
-static FVector GetRelativeLocation(long actor) {
-    return Read<FVector>(Read<long>(actor + I64("0x1C8")) + I64("0x1C0")); // kRootComponent placeholder
-}
-
-// هنا تم إكمال دالة كشف الرؤية بشكل آمن (GetLineOfSightTo)
-static string CameraManagerClassName, PlayerControllerClassName;
-static bool (*LineOfSightTo)(void *controller, void *actor, FVector bone_point, bool ischeck);
-
-static bool GetLineOfSightTo(long player, FVector BonePoint) {
-    if (PlayerController <= 0) return false;
-    
-    long IDLineOfSight = Read<long>(GetRealOffset(kLineOfSight_1));
-    if (!IsValidAddress(IDLineOfSight)) return false;
-    
-    // إرجاع قيمة افتراضية آمنة (True) لعدم توقف اللعبة (Crash)
-    return true; 
-}
+  
